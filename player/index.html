@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Streaming en vivo · WebRTC</title>
+  <style>
+    :root { --bg:#0d1117; --panel:#161b22; --line:#30363d; --text:#e6edf3; --muted:#8b949e; --accent:#2f81f7; --ok:#3fb950; --bad:#f85149; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:var(--bg); color:var(--text); }
+    header { padding:16px 24px; border-bottom:1px solid var(--line); display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+    h1 { font-size:18px; margin:0 auto 0 0; }
+    input, button { font:inherit; padding:8px 12px; border-radius:6px; border:1px solid var(--line); background:var(--panel); color:var(--text); }
+    button { background:var(--accent); border-color:var(--accent); cursor:pointer; }
+    main { max-width:1100px; margin:24px auto; padding:0 16px; }
+    .status { margin-top:12px; color:var(--muted); font-size:14px; display:flex; gap:16px; flex-wrap:wrap; }
+    .dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--muted); margin-right:6px; }
+    .dot.ok { background:var(--ok); } .dot.bad { background:var(--bad); }
+    code { background:var(--panel); padding:2px 6px; border-radius:4px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>📡 Streaming en vivo</h1>
+    <label for="stream">Stream</label>
+    <input id="stream" value="demo" size="12">
+    <button id="play">Reproducir</button>
+  </header>
+  <main>
+    <div id="player"></div>
+    <div class="status">
+      <span><span id="dot" class="dot"></span><span id="state">Detenido</span></span>
+      <span>Protocolo: <code id="proto">—</code></span>
+      <span>Fuente: <code id="src">—</code></span>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.6.19/dist/hls.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/ovenplayer@0.10.55/dist/ovenplayer.js"></script>
+  <script>
+    const host = location.hostname || "localhost";
+    const params = new URLSearchParams(location.search);
+    const $ = (id) => document.getElementById(id);
+    if (params.get("stream")) $("stream").value = params.get("stream");
+
+    let player;
+    function play() {
+      const name = $("stream").value.trim() || "demo";
+      history.replaceState(null, "", "?stream=" + encodeURIComponent(name));
+      if (player) player.remove();
+      const webrtc = `ws://${host}:3333/app/${name}`;
+      const llhls  = `http://${host}:3333/app/${name}/llhls.m3u8`;
+      player = OvenPlayer.create("player", {
+        autoStart: true, mute: true, autoFallback: true,
+        sources: [
+          { label: "WebRTC", type: "webrtc", file: webrtc },
+          { label: "LL-HLS", type: "llhls",  file: llhls }
+        ]
+      });
+      const set = (txt, cls) => { $("state").textContent = txt; $("dot").className = "dot " + (cls || ""); };
+      set("Conectando…");
+      player.on("stateChanged", (e) => {
+        if (e.newstate === "playing") set("En vivo", "ok");
+        else if (e.newstate === "error") set("Sin señal: ¿OBS está transmitiendo?", "bad");
+        else set(e.newstate);
+        const s = player.getCurrentSource && player.getSources()[player.getCurrentSource()];
+        if (s) { $("proto").textContent = s.label; $("src").textContent = s.file; }
+      });
+      player.on("error", () => set("Sin señal: reintenta en unos segundos", "bad"));
+    }
+    $("play").addEventListener("click", play);
+    $("stream").addEventListener("keydown", (e) => e.key === "Enter" && play());
+    play();
+  </script>
+</body>
+</html>

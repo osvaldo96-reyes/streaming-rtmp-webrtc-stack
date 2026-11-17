@@ -1,0 +1,4 @@
+ignored:
+  # Paquetes de Alpine sin versión fija: la imagen base (alpine:3.22) ya acota las versiones
+  # y Trivy en CI vigila las vulnerabilidades.
+  - DL3018

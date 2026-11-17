@@ -1,0 +1,41 @@
+# Pipeline de video en vivo: OBS --RTMP--> SRS --relay FFmpeg--> OvenMediaEngine --WebRTC/LL-HLS--> navegador
+name: streaming-stack
+
+services:
+  srs:
+    image: ossrs/srs:6.0.195
+    restart: unless-stopped
+    ports:
+      - "1935:1935"   # RTMP de entrada (OBS publica aquí)
+      - "1985:1985"   # API HTTP (lista de streams activos)
+      - "8080:8080"   # consola web de SRS
+
+  ome:
+    image: airensoft/ovenmediaengine:v0.20.5
+    restart: unless-stopped
+    environment:
+      # IP con la que el navegador alcanza este host (candidato ICE de WebRTC)
+      OME_HOST_IP: ${HOST_IP:-127.0.0.1}
+    ports:
+      - "3333:3333"                 # señalización WebRTC + LL-HLS
+      - "3478:3478"                 # WebRTC sobre TCP (TURN), para redes que bloquean UDP
+      - "10000-10004:10000-10004/udp"  # medios WebRTC (ICE)
+
+  relay:
+    build: ./relay
+    image: streaming-stack/relay:local
+    restart: unless-stopped
+    depends_on: [srs, ome]
+    environment:
+      SOURCE_BASE: rtmp://srs:1935/live
+      DEST_BASE: rtmp://ome:1935/app
+      STREAMS: ${STREAMS:-demo}
+    stop_grace_period: 10s
+
+  player:
+    image: nginx:1.28-alpine
+    restart: unless-stopped
+    ports:
+      - "${PLAYER_PORT:-8088}:80"
+    volumes:
+      - ./player:/usr/share/nginx/html:ro

@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint (Dockerfile, shell, compose)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Hadolint
+        uses: hadolint/hadolint-action@06be81baf89a55ffd0e24b8f04a4185738dd3387 # v3.5.0
+        with:
+          dockerfile: relay/Dockerfile
+
+      - name: ShellCheck
+        run: shellcheck relay/relay.sh scripts/*.sh
+
+      - name: Validar docker-compose.yml
+        run: docker compose config -q
+
+  security:
+    name: Escaneo de vulnerabilidades (Trivy)
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Construir imagen del relay
+        run: docker build -t streaming-stack/relay:ci relay
+
+      - name: Trivy
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: streaming-stack/relay:ci
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+
+  e2e:
+    name: Prueba de punta a punta (RTMP -> WebRTC/LL-HLS)
+    needs: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Levantar stack
+        run: docker compose up -d --build --wait --wait-timeout 120 srs ome player && docker compose up -d relay
+
+      - name: Smoke test
+        run: ./scripts/smoke-test.sh
+
+      - name: Logs (si falla)
+        if: failure()
+        run: docker compose logs --no-color --tail=200
+
+      - name: Apagar
+        if: always()
+        run: docker compose down -v
